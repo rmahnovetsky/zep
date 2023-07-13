@@ -1,12 +1,12 @@
 llm:
   # gpt-3.5-turbo or gpt-4
-  model: "gpt-3.5-turbo"
+  model: "gpt-3.5-turbo-16k"
   azure_openai_endpoint:
   openai_org_id:
 nlp:
   server_url: "http://localhost:8080"
 memory:
-  message_window: 12
+  message_window: 48
 extractors:
   summarizer:
     enabled: true
@@ -35,6 +35,6 @@ auth:
 data:
   #  PurgeEvery is the period between hard deletes, in minutes.
   #  If set to 0 or undefined, hard deletes will not be performed.
-  purge_every: 60
+  purge_every: 1
 log:
   level: "info"
