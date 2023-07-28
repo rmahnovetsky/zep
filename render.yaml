@@ -6,7 +6,7 @@ services:
     env: image
     plan: free
     image:
-      url: ghcr.io/getzep/zep-cloud:0.8.0
+      url: ghcr.io/getzep/zep-cloud:0.8.1
     healthCheckPath: /healthz
     envVars:
       - key: PORT
