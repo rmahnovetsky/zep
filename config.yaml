@@ -6,7 +6,7 @@ llm:
 nlp:
   server_url: "http://localhost:8080"
 memory:
-  message_window: 36
+  message_window: 40
 extractors:
   summarizer:
     enabled: true
