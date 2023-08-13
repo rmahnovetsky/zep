@@ -34,4 +34,4 @@ databases:
     databaseName: zep
     postgresMajorVersion: 15
     ipAllowList: [] # only allow internal connections
-    plan: free
+    plan: starter
