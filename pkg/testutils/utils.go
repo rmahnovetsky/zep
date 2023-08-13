@@ -6,9 +6,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
+
+	"github.com/oiime/logrusbun"
+	"github.com/sirupsen/logrus"
+	"github.com/uptrace/bun"
 
 	"github.com/spf13/viper"
 
@@ -29,7 +35,7 @@ func init() {
 
 func GetDSN() string {
 	var testDsn = "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
-	dsnFromEnv := viper.GetString("memory_store.postgres.dsn")
+	dsnFromEnv := viper.GetString("store.postgres.dsn")
 	if dsnFromEnv != "" {
 		return dsnFromEnv
 	}
@@ -92,4 +98,28 @@ func FindProjectRoot() (string, error) {
 		// Move up one directory level.
 		dir = filepath.Dir(dir)
 	}
+}
+
+func SetUpDBLogging(db *bun.DB, log logrus.FieldLogger) {
+	db.AddQueryHook(logrusbun.NewQueryHook(logrusbun.QueryHookOptions{
+		LogSlow:         time.Second,
+		Logger:          log,
+		QueryLevel:      logrus.InfoLevel,
+		ErrorLevel:      logrus.ErrorLevel,
+		SlowLevel:       logrus.WarnLevel,
+		MessageTemplate: "{{.Operation}}[{{.Duration}}]: {{.Query}}",
+		ErrorTemplate:   "{{.Operation}}[{{.Duration}}]: {{.Query}}: {{.Error}}",
+	}))
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyz" +
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func GenerateRandomString(length int) string {
+	b := make([]byte, length)
+	for i := range b {
+		bigInt, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		b[i] = charset[bigInt.Int64()]
+	}
+	return string(b)
 }
