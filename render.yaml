@@ -3,6 +3,7 @@ services:
   - type: web
     name: zep
     autoDeploy: false
+    region: singapore
     env: image
     plan: free
     image:
@@ -23,6 +24,7 @@ services:
       - key: ZEP_OPENAI_API_KEY
         sync: false
   - type: pserv
+    region: singapore
     name: zep-nlp
     autoDeploy: false
     env: image
@@ -31,6 +33,7 @@ services:
 
 databases:
   - name: zep-postgres
+    region: singapore
     databaseName: zep
     postgresMajorVersion: 15
     ipAllowList: [] # only allow internal connections
