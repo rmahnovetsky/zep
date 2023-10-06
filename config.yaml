@@ -67,7 +67,7 @@ auth:
 data:
   #  PurgeEvery is the period between hard deletes, in minutes.
   #  If set to 0 or undefined, hard deletes will not be performed.
-  purge_every: 60
+  purge_every: 10
 log:
   level: "info"
 # Custom Prompts Configuration
