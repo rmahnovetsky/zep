@@ -11,8 +11,10 @@ services:
     envVars:
       # Disable web UI. WARNING: Do not enable this unless
       # you are running Zep on a private network.
-      # - key: ZEP_SERVER_WEB_ENABLED
-      #   value: false
+      - key: ZEP_MEMORY_MESSAGE_WINDOW
+        value: 40
+      - key: ZEP_SERVER_WEB_ENABLED
+        value: false
       - key: PORT
         value: 8000
       - key: ZEP_STORE_POSTGRES_DSN
