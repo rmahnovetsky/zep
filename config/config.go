@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/getzep/zep/internal"
@@ -15,8 +16,10 @@ var log = logrus.New()
 
 // EnvVars is a set of secrets that should be stored in the environment, not config file
 var EnvVars = map[string]string{
-	"llm.openai_api_key": "ZEP_OPENAI_API_KEY",
-	"auth.secret":        "ZEP_AUTH_SECRET",
+	"llm.anthropic_api_key": "ZEP_ANTHROPIC_API_KEY",
+	"llm.openai_api_key":    "ZEP_OPENAI_API_KEY",
+	"auth.secret":           "ZEP_AUTH_SECRET",
+	"development":           "ZEP_DEVELOPMENT",
 }
 
 // LoadConfig loads the config file and ENV variables into a Config struct
@@ -37,7 +40,7 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	if err := viper.ReadInConfig(); err != nil {
 		// Ignore error if config file not found
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+		if errors.Is(err, viper.ConfigFileNotFoundError{}) {
 			return nil, err
 		}
 	}
@@ -79,6 +82,11 @@ func bindEnv(key string, envVar string) {
 
 // SetLogLevel sets the log level based on the config file. Defaults to INFO if not set or invalid
 func SetLogLevel(cfg *Config) {
+	if cfg.Development {
+		internal.SetLogLevel(logrus.DebugLevel)
+		log.Info("Development mode. Setting log level to: ", logrus.DebugLevel)
+		return
+	}
 	level, err := logrus.ParseLevel(cfg.Log.Level)
 	if err != nil {
 		level = logrus.InfoLevel

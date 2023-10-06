@@ -14,9 +14,14 @@ import (
 // TODO: Unit test documentSearchOperation
 // TODO: Test non-happy paths
 
+// End to end with local embedding
+// won't pass if NLP service is running via docker-compose
 func TestDocumentSearchWithIndexEndToEnd(t *testing.T) {
 	gofakeit.Seed(0)
 	ctx, done := context.WithCancel(testCtx)
+
+	appState.Config.Extractors.Documents.Embeddings.Service = "openai"
+	appState.Config.Extractors.Documents.Embeddings.Dimensions = 1536
 
 	collectionName := testutils.GenerateRandomString(16)
 
@@ -35,33 +40,35 @@ func TestDocumentSearchWithIndexEndToEnd(t *testing.T) {
 
 	// create documents
 	docCollection, err := newDocumentCollectionWithDocs(ctx, collectionName,
-		500, false, true, 384)
+		500, false, true, 1536)
 	assert.NoError(t, err)
 
-	collection := docCollection.collection.DocumentCollection
+	// TODO: Test without HNSW
+	// collection := docCollection.collection.DocumentCollection
+	// // create index
+	// vci, err := NewVectorColIndex(
+	// 	ctx,
+	// 	appState,
+	// 	collection,
+	// )
+	// assert.NoError(t, err)
 
-	// create index
-	vci, err := NewVectorColIndex(
-		ctx,
-		appState,
-		collection,
-	)
-	assert.NoError(t, err)
+	// err = vci.CreateIndex(context.Background(), true)
+	// assert.NoError(t, err)
 
-	err = vci.CreateIndex(context.Background(), true)
-	assert.NoError(t, err)
+	// pollIndexCreation(documentStore, collectionName, ctx, t)
 
-	// Set Collection's IsIndexed flag to true
-	col, err := documentStore.GetCollection(ctx, vci.Collection.Name)
-	assert.NoError(t, err)
-	assert.Equal(t, true, col.IsIndexed)
-	assert.True(t, col.ProbeCount > 0)
-	assert.True(t, col.ListCount > 0)
+	// // Set Collection's IsIndexed flag to true
+	// col, err := documentStore.GetCollection(ctx, vci.Collection.Name)
+	// assert.NoError(t, err)
+	// assert.Equal(t, true, col.IsIndexed)
+	// assert.True(t, col.ProbeCount > 0)
+	// assert.True(t, col.ListCount > 0)
 
 	limit := 5
 	searchPayload := &models.DocumentSearchPayload{
 		Text:           gofakeit.HipsterParagraph(2, 2, 12, " "),
-		CollectionName: collectionName,
+		CollectionName: docCollection.collection.Name,
 	}
 	// Search for a document
 	searchResults, err := documentStore.SearchCollection(

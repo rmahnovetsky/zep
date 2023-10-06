@@ -89,6 +89,8 @@ func putMessageMetadataTx(
 	err = tx.NewSelect().Model(&retrievedMessage).
 		Column("metadata").
 		Where("session_id = ? AND uuid = ?", sessionID, message.UUID).
+		// Don't error out if the message is deleted
+		WhereAllWithDeleted().
 		Scan(ctx)
 	if err != nil {
 		return nil, store.NewStorageError(
@@ -104,7 +106,7 @@ func putMessageMetadataTx(
 	retrievedMessage.UUID = message.UUID
 	_, err = tx.NewUpdate().
 		Model(&retrievedMessage).
-		Column("metadata").
+		Column("metadata", "updated_at").
 		Where("session_id = ? AND uuid = ?", sessionID, message.UUID).
 		Returning("*").
 		Exec(ctx)

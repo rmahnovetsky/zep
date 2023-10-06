@@ -9,10 +9,23 @@ import (
 type Message struct {
 	UUID       uuid.UUID              `json:"uuid"`
 	CreatedAt  time.Time              `json:"created_at"`
+	UpdatedAt  time.Time              `json:"updated_at"`
 	Role       string                 `json:"role"`
 	Content    string                 `json:"content"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 	TokenCount int                    `json:"token_count"`
+}
+
+type MessageListResponse struct {
+	Messages   []Message `json:"messages"`
+	TotalCount int       `json:"total_count"`
+	RowCount   int       `json:"row_count"`
+}
+
+type SummaryListResponse struct {
+	Summaries  []Summary `json:"summaries"`
+	TotalCount int       `json:"total_count"`
+	RowCount   int       `json:"row_count"`
 }
 
 type Summary struct {

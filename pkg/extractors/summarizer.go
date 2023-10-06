@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"strings"
 
+	llms2 "github.com/tmc/langchaingo/llms"
+
 	"github.com/getzep/zep/internal"
 	"github.com/getzep/zep/pkg/llms"
 	"github.com/getzep/zep/pkg/models"
 )
 
-const SummaryMaxOutputTokens = 512
+const MaxTokensFallback = 2048
+const SummaryMaxOutputTokens = 1024
 
 // Force compiler to validate that Extractor implements the MemoryStore interface.
 var _ models.Extractor = &SummaryExtractor{}
@@ -144,7 +147,7 @@ func summarize(
 	}
 	maxTokens, ok := llms.MaxLLMTokensMap[modelName]
 	if !ok {
-		return &models.Summary{}, fmt.Errorf("model name not found in MaxLLMTokensMap")
+		maxTokens = MaxTokensFallback
 	}
 
 	if promptTokens == 0 {
@@ -218,7 +221,7 @@ func processOverLimitMessages(
 
 	for _, message := range messages {
 		messageText := fmt.Sprintf("%s: %s", message.Role, message.Content)
-		messageTokens, err := llms.GetTokenCount(messageText)
+		messageTokens, err := appState.LLMClient.GetTokenCount(messageText)
 		if err != nil {
 			return nil, err
 		}
@@ -248,6 +251,22 @@ func processOverLimitMessages(
 	}, nil
 }
 
+func validateSummarizerPrompt(prompt string) error {
+	prevSummaryIdentifier := "{{.PrevSummary}}"
+	messagesJoinedIdentifier := "{{.MessagesJoined}}"
+
+	isCustomPromptValid := strings.Contains(prompt, prevSummaryIdentifier) &&
+		strings.Contains(prompt, messagesJoinedIdentifier)
+
+	if !isCustomPromptValid {
+		return fmt.Errorf(
+			"wrong summary prompt format. please make sure it contains the identifiers %s and %s",
+			prevSummaryIdentifier, messagesJoinedIdentifier,
+		)
+	}
+	return nil
+}
+
 // incrementalSummarizer takes a slice of messages and a summary, calls the LLM,
 // and returns a new summary enriched with the messages content. Summary can be
 // an empty string. Returns a string with the new summary and the number of
@@ -274,18 +293,59 @@ func incrementalSummarizer(
 		MessagesJoined: messagesJoined,
 	}
 
-	progressivePrompt, err := internal.ParsePrompt(summaryPromptTemplate, promptData)
+	progressivePrompt, err := generateProgressiveSummarizerPrompt(appState, promptData)
 	if err != nil {
 		return "", 0, err
 	}
 
-	resp, err := llms.RunChatCompletion(ctx, appState, summaryMaxTokens, progressivePrompt)
+	summary, err := appState.LLMClient.Call(
+		ctx,
+		progressivePrompt,
+		llms2.WithMaxTokens(summaryMaxTokens),
+	)
 	if err != nil {
 		return "", 0, err
 	}
 
-	completion := resp.Choices[0].Message.Content
-	tokensUsed := resp.Usage.TotalTokens
+	summary = strings.TrimSpace(summary)
 
-	return completion, tokensUsed, nil
+	tokensUsed, err := appState.LLMClient.GetTokenCount(summary)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return summary, tokensUsed, nil
+}
+
+func generateProgressiveSummarizerPrompt(
+	appState *models.AppState,
+	promptData SummaryPromptTemplateData,
+) (string, error) {
+	customSummaryPromptTemplateAnthropic := appState.Config.CustomPrompts.SummarizerPrompts.Anthropic
+	customSummaryPromptTemplateOpenAI := appState.Config.CustomPrompts.SummarizerPrompts.OpenAI
+
+	var summaryPromptTemplate string
+	switch appState.Config.LLM.Service {
+	case "openai":
+		if customSummaryPromptTemplateOpenAI != "" {
+			summaryPromptTemplate = customSummaryPromptTemplateOpenAI
+		} else {
+			summaryPromptTemplate = defaultSummaryPromptTemplateOpenAI
+		}
+	case "anthropic":
+		if customSummaryPromptTemplateAnthropic != "" {
+			summaryPromptTemplate = customSummaryPromptTemplateAnthropic
+		} else {
+			summaryPromptTemplate = defaultSummaryPromptTemplateAnthropic
+		}
+	default:
+		return "", fmt.Errorf("unknown LLM service: %s", appState.Config.LLM.Service)
+	}
+
+	err := validateSummarizerPrompt(summaryPromptTemplate)
+	if err != nil {
+		return "", err
+	}
+
+	return internal.ParsePrompt(summaryPromptTemplate, promptData)
 }

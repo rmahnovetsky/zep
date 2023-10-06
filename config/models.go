@@ -3,15 +3,17 @@ package config
 // Config holds the configuration of the application
 // Use cmd.NewConfig to create a new instance
 type Config struct {
-	LLM        LLM              `mapstructure:"llm"`
-	NLP        NLP              `mapstructure:"nlp"`
-	Memory     MemoryConfig     `mapstructure:"memory"`
-	Extractors ExtractorsConfig `mapstructure:"extractors"`
-	Store      StoreConfig      `mapstructure:"store"`
-	Server     ServerConfig     `mapstructure:"server"`
-	Log        LogConfig        `mapstructure:"log"`
-	Auth       AuthConfig       `mapstructure:"auth"`
-	DataConfig DataConfig       `mapstructure:"data"`
+	LLM           LLM                 `mapstructure:"llm"`
+	NLP           NLP                 `mapstructure:"nlp"`
+	Memory        MemoryConfig        `mapstructure:"memory"`
+	Extractors    ExtractorsConfig    `mapstructure:"extractors"`
+	Store         StoreConfig         `mapstructure:"store"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Log           LogConfig           `mapstructure:"log"`
+	Auth          AuthConfig          `mapstructure:"auth"`
+	DataConfig    DataConfig          `mapstructure:"data"`
+	Development   bool                `mapstructure:"development"`
+	CustomPrompts CustomPromptsConfig `mapstructure:"custom_prompts"`
 }
 
 type StoreConfig struct {
@@ -20,12 +22,19 @@ type StoreConfig struct {
 }
 
 type LLM struct {
-	Model string `mapstructure:"model"`
-	// OpenAIAPIKey is loaded from ENV not config file.
-	OpenAIAPIKey        string `mapstructure:"openai_api_key"`
-	AzureOpenAIEndpoint string `mapstructure:"azure_openai_endpoint"`
-	OpenAIEndpoint      string `mapstructure:"openai_endpoint"`
-	OpenAIOrgID         string `mapstructure:"openai_org_id"`
+	Service             string            `mapstructure:"service"`
+	Model               string            `mapstructure:"model"`
+	AnthropicAPIKey     string            `mapstructure:"anthropic_api_key"`
+	OpenAIAPIKey        string            `mapstructure:"openai_api_key"`
+	AzureOpenAIEndpoint string            `mapstructure:"azure_openai_endpoint"`
+	AzureOpenAIModel    AzureOpenAIConfig `mapstructure:"azure_openai"`
+	OpenAIEndpoint      string            `mapstructure:"openai_endpoint"`
+	OpenAIOrgID         string            `mapstructure:"openai_org_id"`
+}
+
+type AzureOpenAIConfig struct {
+	LLMDeployment       string `mapstructure:"llm_deployment"`
+	EmbeddingDeployment string `mapstructure:"embedding_deployment"`
 }
 
 type NLP struct {
@@ -37,11 +46,19 @@ type MemoryConfig struct {
 }
 
 type PostgresConfig struct {
-	DSN string `mapstructure:"dsn"`
+	DSN              string           `mapstructure:"dsn"`
+	AvailableIndexes AvailableIndexes `mapstructure:"available_indexes"`
+}
+
+type AvailableIndexes struct {
+	IVFFLAT bool `mapstructure:"ivfflat"`
+	HSNW    bool `mapstructure:"hsnw"`
 }
 
 type ServerConfig struct {
-	Port int `mapstructure:"port"`
+	Host       string `mapstructure:"host"`
+	Port       int    `mapstructure:"port"`
+	WebEnabled bool   `mapstructure:"web_enabled"`
 }
 
 type LogConfig struct {
@@ -80,10 +97,25 @@ type SummarizerConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 }
 
+type CustomPromptsConfig struct {
+	SummarizerPrompts ExtractorPromptsConfig `mapstructure:"summarizer_prompts"`
+}
+
+type ExtractorPromptsConfig struct {
+	OpenAI    string `mapstructure:"openai"`
+	Anthropic string `mapstructure:"anthropic"`
+}
+
 type EmbeddingsConfig struct {
 	Enabled    bool   `mapstructure:"enabled"`
 	Dimensions int    `mapstructure:"dimensions"`
 	Service    string `mapstructure:"service"`
+	// MaxProcs is the maximum number of concurrent processes to use for embedding tasks.
+	MaxProcs int `mapstructure:"max_procs"`
+	// ChunkSize is the number of documents to embed in a single task.
+	ChunkSize int `mapstructure:"chunk_size"`
+	// BufferSize is the size of the channel buffer for embedding tasks.
+	BufferSize int `mapstructure:"buffer_size"`
 }
 
 type EntityExtractorConfig struct {

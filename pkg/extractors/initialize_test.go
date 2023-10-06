@@ -33,12 +33,20 @@ func setup() {
 
 	appState = &models.AppState{}
 	cfg := testutils.NewTestConfig()
-	appState.OpenAIClient = llms.NewOpenAIRetryClient(cfg)
+
+	llmClient, err := llms.NewLLMClient(context.Background(), cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	appState.LLMClient = llmClient
 	appState.Config = cfg
-	appState.Config.Store.Postgres.DSN = testutils.GetDSN()
 
 	// Initialize the database connection
-	testDB = postgres.NewPostgresConn(appState)
+	testDB, err = postgres.NewPostgresConn(appState)
+	if err != nil {
+		panic(err)
+	}
 	testutils.SetUpDBLogging(testDB, logger)
 
 	// Initialize the test context

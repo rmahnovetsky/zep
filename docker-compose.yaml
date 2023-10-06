@@ -4,6 +4,7 @@ services:
     image: ghcr.io/getzep/postgres:latest
     container_name: zep-postgres
     restart: on-failure
+    shm_size: "128mb"  # Increase this if vacuuming fails with a "no space left on device" error
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -12,6 +13,8 @@ services:
       dockerfile: Dockerfile.postgres
     networks:
       - zep-network
+    volumes:
+      - zep-db:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD", "pg_isready", "-q", "-d", "postgres", "-U", "postgres" ]
       interval: 5s
@@ -71,4 +74,5 @@ services:
 networks:
   zep-network:
     driver: bridge
-
+volumes:
+  zep-db:

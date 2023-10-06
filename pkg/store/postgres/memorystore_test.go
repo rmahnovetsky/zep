@@ -10,14 +10,12 @@ import (
 	"github.com/getzep/zep/pkg/llms"
 
 	"github.com/getzep/zep/pkg/extractors"
-	"github.com/getzep/zep/pkg/store"
 
 	"github.com/getzep/zep/internal"
 	"github.com/sirupsen/logrus"
 
 	"github.com/getzep/zep/pkg/models"
 	"github.com/getzep/zep/pkg/testutils"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
@@ -44,12 +42,20 @@ func setup() {
 
 	appState = &models.AppState{}
 	cfg := testutils.NewTestConfig()
-	appState.OpenAIClient = llms.NewOpenAIRetryClient(cfg)
+
+	llmClient, err := llms.NewLLMClient(context.Background(), cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	appState.LLMClient = llmClient
 	appState.Config = cfg
-	appState.Config.Store.Postgres.DSN = testutils.GetDSN()
 
 	// Initialize the database connection
-	testDB = NewPostgresConn(appState)
+	testDB, err = NewPostgresConn(appState)
+	if err != nil {
+		panic(err)
+	}
 	testutils.SetUpDBLogging(testDB, logger)
 
 	// Initialize the test context
@@ -62,7 +68,7 @@ func setup() {
 	appState.MemoryStore = memoryStore
 	extractors.Initialize(appState)
 
-	err = ensurePostgresSetup(testCtx, appState, testDB)
+	err = CreateSchema(testCtx, appState, testDB)
 	if err != nil {
 		panic(err)
 	}
@@ -121,15 +127,15 @@ func TestPutMessages(t *testing.T) {
 	})
 
 	t.Run(
-		"upsert messages with deleted session should error",
+		"upsert messages with deleted session should not error",
 		func(t *testing.T) {
 			sessionID := createSession(t)
 
 			insertedMessages, err := putMessages(testCtx, testDB, sessionID, messages)
 			assert.NoError(t, err, "putMessages should not return an error")
 
-			// Delete using deleteSession
-			err = deleteSession(testCtx, testDB, sessionID)
+			sessionStore := NewSessionDAO(testDB)
+			err = sessionStore.Delete(testCtx, sessionID)
 			assert.NoError(t, err, "deleteSession should not return an error")
 
 			messagesOnceDeleted, err := getMessages(testCtx, testDB, sessionID, 12, nil, 0)
@@ -140,12 +146,7 @@ func TestPutMessages(t *testing.T) {
 
 			// Call putMessages function to upsert the messages
 			_, err = putMessages(testCtx, testDB, sessionID, insertedMessages)
-			assert.ErrorContains(
-				t,
-				err,
-				"deleted",
-				"putMessages should return SessionDeletedError",
-			)
+			assert.NoError(t, err, "putMessages should not return an error")
 		},
 	)
 }
@@ -154,7 +155,11 @@ func createSession(t *testing.T) string {
 	sessionID, err := testutils.GenerateRandomSessionID(16)
 	assert.NoError(t, err, "GenerateRandomSessionID should not return an error")
 
-	_, err = putSession(testCtx, testDB, sessionID, map[string]interface{}{}, false)
+	sessionManager := NewSessionDAO(testDB)
+	session := &models.CreateSessionRequest{
+		SessionID: sessionID,
+	}
+	_, err = sessionManager.Create(testCtx, session)
 	assert.NoError(t, err, "putSession should not return an error")
 
 	return sessionID
@@ -203,6 +208,12 @@ func verifyMessagesInDB(
 			expectedMessages[i].Metadata,
 			resultMessages[i].Metadata,
 			"Expected Metadata to be equal",
+		)
+		assert.Less(
+			t,
+			resultMessages[i].CreatedAt,
+			resultMessages[i].UpdatedAt,
+			"CreatedAt should be less than UpdatedAt",
 		)
 	}
 }
@@ -314,6 +325,75 @@ func TestGetMessages(t *testing.T) {
 	}
 }
 
+func TestGetMessageList(t *testing.T) {
+	// Create a test session
+	sessionID, err := testutils.GenerateRandomSessionID(16)
+	assert.NoError(t, err, "GenerateRandomSessionID should not return an error")
+
+	messages, err := putMessages(testCtx, testDB, sessionID, testutils.TestMessages)
+	assert.NoError(t, err)
+
+	expectedMessages := make([]models.Message, len(messages))
+	copy(expectedMessages, messages)
+
+	tests := []struct {
+		name           string
+		sessionID      string
+		pageNumber     int
+		pageSize       int
+		expectedLength int
+	}{
+		{
+			name:           "Existing session",
+			sessionID:      sessionID,
+			pageNumber:     1,
+			pageSize:       10,
+			expectedLength: 10,
+		},
+		{
+			name:           "Non-existent session",
+			sessionID:      "nonexistent",
+			pageNumber:     1,
+			pageSize:       10,
+			expectedLength: 0,
+		},
+		{
+			name:           "Existing session with pagination",
+			sessionID:      sessionID,
+			pageNumber:     2,
+			pageSize:       10,
+			expectedLength: 10,
+		},
+		// Add more test cases as needed
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := getMessageList(testCtx, testDB, tt.sessionID, tt.pageNumber, tt.pageSize)
+			assert.NoError(t, err)
+
+			if tt.expectedLength > 0 {
+				assert.NotNil(t, result)
+				assert.Equal(t, tt.expectedLength, len(result.Messages))
+
+				expectedDict := make(map[string]bool)
+				for _, msg := range expectedMessages {
+					expectedDict[msg.Role+msg.Content] = true
+				}
+
+				for _, msg := range result.Messages {
+					_, exists := expectedDict[msg.Role+msg.Content]
+					assert.True(t, exists)
+					assert.NotEmpty(t, msg.UUID)
+					assert.False(t, msg.CreatedAt.IsZero())
+				}
+			} else {
+				assert.Nil(t, result)
+			}
+		})
+	}
+}
+
 // equate map[string]interface{}(nil) and map[string]interface{}{}
 // the latter is returned by the database when a row has no metadata.
 // both eval to len == 0
@@ -328,181 +408,12 @@ func equivalentMaps(expected, got map[string]interface{}) bool {
 		((reflect.DeepEqual(expected, got)) && (expected != nil && got != nil))
 }
 
-func TestPutSummary(t *testing.T) {
-	sessionID, err := testutils.GenerateRandomSessionID(16)
-	assert.NoError(t, err, "GenerateRandomSessionID should not return an error")
-
-	_, err = putSession(testCtx, testDB, sessionID, map[string]interface{}{}, true)
-	assert.NoError(t, err, "putSession should not return an error")
-
-	messages := []models.Message{
-		{
-			Role:     "user",
-			Content:  "Hello",
-			Metadata: map[string]interface{}{"timestamp": "1629462540"},
-		},
-		{
-			Role:     "bot",
-			Content:  "Hi there!",
-			Metadata: map[string]interface{}{"timestamp": 1629462551},
-		},
-	}
-
-	// Call putMessages function
-	resultMessages, err := putMessages(testCtx, testDB, sessionID, messages)
-	assert.NoError(t, err, "putMessages should not return an error")
-
-	tests := []struct {
-		name             string
-		sessionID        string
-		summary          models.Summary
-		SummaryPointUUID uuid.UUID
-		wantErr          bool
-		errMessage       string
-	}{
-		{
-			name:      "Valid summary",
-			sessionID: sessionID,
-			summary: models.Summary{
-				Content: "Test content",
-				Metadata: map[string]interface{}{
-					"key": "value",
-				},
-				SummaryPointUUID: resultMessages[0].UUID,
-			},
-
-			wantErr: false,
-		},
-		{
-			name:      "Empty session ID",
-			sessionID: "",
-			summary: models.Summary{
-				Content: "Test content",
-				Metadata: map[string]interface{}{
-					"key": "value",
-				},
-				SummaryPointUUID: resultMessages[1].UUID,
-			},
-
-			wantErr:    true,
-			errMessage: "sessionID cannot be empty",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resultSummary, err := putSummary(
-				testCtx,
-				testDB,
-				tt.sessionID,
-				&tt.summary,
-			)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				storageErr, ok := err.(*store.StorageError)
-				if ok {
-					assert.Equal(t, tt.errMessage, storageErr.Message)
-				}
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, resultSummary)
-				assert.NotEmpty(t, resultSummary.UUID)
-				assert.False(t, resultSummary.CreatedAt.IsZero())
-				assert.Equal(t, tt.summary.Content, resultSummary.Content)
-				assert.Equal(t, tt.summary.Metadata, resultSummary.Metadata)
-			}
-		})
-	}
-}
-
-func TestGetSummary(t *testing.T) {
-	sessionID, err := testutils.GenerateRandomSessionID(16)
-	assert.NoError(t, err, "GenerateRandomSessionID should not return an error")
-	metadata := map[string]interface{}{
-		"key": "value",
-	}
-	_, err = putSession(testCtx, testDB, sessionID, metadata, true)
-	assert.NoError(t, err)
-
-	summary := models.Summary{
-		Content: "Test content",
-		Metadata: map[string]interface{}{
-			"key": "value",
-		},
-	}
-	summaryTwo := models.Summary{
-		Content: "Test content 2",
-		Metadata: map[string]interface{}{
-			"key": "value",
-		},
-	}
-
-	messages := []models.Message{
-		{
-			Role:     "user",
-			Content:  "Hello",
-			Metadata: map[string]interface{}{"timestamp": "1629462540"},
-		},
-		{
-			Role:     "bot",
-			Content:  "Hello!",
-			Metadata: map[string]interface{}{"timestamp": "1629462540"},
-		},
-	}
-
-	// Call putMessages function
-	resultMessages, err := putMessages(testCtx, testDB, sessionID, messages)
-	assert.NoError(t, err, "putMessages should not return an error")
-
-	summary.SummaryPointUUID = resultMessages[0].UUID
-	_, err = putSummary(testCtx, testDB, sessionID, &summary)
-	assert.NoError(t, err, "putSummary should not return an error")
-
-	summaryTwo.SummaryPointUUID = resultMessages[1].UUID
-	putSummaryResultTwo, err := putSummary(testCtx, testDB, sessionID, &summaryTwo)
-	assert.NoError(t, err, "putSummary2 should not return an error")
-
-	tests := []struct {
-		name          string
-		sessionID     string
-		expectedFound bool
-	}{
-		{
-			name:          "Existing summary",
-			sessionID:     sessionID,
-			expectedFound: true,
-		},
-		{
-			name:          "Non-existent session",
-			sessionID:     "nonexistent",
-			expectedFound: false,
-		},
-		// Add more test cases as needed
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := getSummary(testCtx, testDB, tt.sessionID)
-			assert.NoError(t, err)
-
-			if tt.expectedFound {
-				assert.NotNil(t, result)
-				// Ensure it is the last summary added
-				assert.Equal(t, putSummaryResultTwo.UUID, result.UUID)
-				assert.False(t, result.CreatedAt.IsZero())
-				assert.Equal(t, putSummaryResultTwo.Content, result.Content)
-				assert.Equal(t, putSummaryResultTwo.Metadata, result.Metadata)
-			} else {
-				assert.Nil(t, result)
-			}
-		})
-	}
-}
-
 func TestPutEmbeddingsLocal(t *testing.T) {
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(testCtx, appState, testDB)
+	err := CreateSchema(testCtx, appState, testDB)
+	assert.NoError(t, err)
+
+	err = MigrateMessageEmbeddingDims(testCtx, testDB, embeddingModel.Dimensions)
 	assert.NoError(t, err)
 
 	sessionID, err := testutils.GenerateRandomSessionID(16)

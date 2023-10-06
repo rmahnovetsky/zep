@@ -4,13 +4,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getzep/zep/pkg/llms"
 	"github.com/getzep/zep/pkg/models"
 	"github.com/getzep/zep/pkg/testutils"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIntentExtractor_Extract(t *testing.T) {
-	store := appState.MemoryStore
+func runTestIntentExtractor(t *testing.T, testAppState *models.AppState) {
+	store := testAppState.MemoryStore
 
 	sessionID, err := testutils.GenerateRandomSessionID(16)
 	assert.NoError(t, err)
@@ -19,17 +20,14 @@ func TestIntentExtractor_Extract(t *testing.T) {
 
 	err = store.PutMemory(
 		testCtx,
-		appState,
+		testAppState,
 		sessionID,
 		&models.Memory{Messages: testMessages},
 		true,
 	)
 	assert.NoError(t, err)
 
-	// Sleep for 2 seconds
-	time.Sleep(2 * time.Second)
-
-	memories, err := store.GetMemory(testCtx, appState, sessionID, 0)
+	memories, err := store.GetMemory(testCtx, testAppState, sessionID, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, len(testMessages), len(memories.Messages))
 
@@ -41,7 +39,7 @@ func TestIntentExtractor_Extract(t *testing.T) {
 			Messages:  []models.Message{message},
 		}
 
-		err = intentExtractor.Extract(testCtx, appState, singleMessageEvent)
+		err = intentExtractor.Extract(testCtx, testAppState, singleMessageEvent)
 		assert.NoError(t, err)
 
 		metadata := message.Metadata["system"]
@@ -57,4 +55,25 @@ func TestIntentExtractor_Extract(t *testing.T) {
 		// Sleep for 2 seconds between each extract
 		time.Sleep(2 * time.Second)
 	}
+}
+
+func TestIntentExtractor_Extract_OpenAI(t *testing.T) {
+	appState.Config.LLM.Model = "gpt-3.5-turbo"
+	llmClient, err := llms.NewOpenAILLM(testCtx, appState.Config)
+	assert.NoError(t, err)
+	appState.LLMClient = llmClient
+
+	runTestIntentExtractor(t, appState)
+}
+
+func TestIntentExtractor_Extract_Anthropic(t *testing.T) {
+	appState.Config.LLM.Model = "claude-2"
+	llmClient, err := llms.NewAnthropicLLM(testCtx, appState.Config)
+	assert.NoError(t, err)
+	appState.LLMClient = llmClient
+
+	runTestIntentExtractor(t, appState)
+
+	//
+	appState.Config = testutils.NewTestConfig()
 }

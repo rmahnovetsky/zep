@@ -1,8 +1,20 @@
 llm:
-  # gpt-3.5-turbo or gpt-4
+  # openai or anthropic
+  service: "openai"
+  # OpenAI: gpt-3.5-turbo, gpt-4, gpt-3.5-turbo-16k, gpt-4-32k; Anthropic: claude-instant-1 or claude-2
   model: "gpt-3.5-turbo"
+  ## OpenAI-specific settings
   # Only used for Azure OpenAI API
   azure_openai_endpoint:
+  # for Azure OpenAI API deployment, the model may be deployed with custom deployment names
+  # set the deployment names if you encounter in logs HTTP 404 errors:
+  #   "The API deployment for this resource does not exist."
+  azure_openai:
+  # llm.model name is used as deployment name as reasonable default if not set
+  # assuming base model is deployed with deployment name matching model name
+  #   llm_deployment: "gpt-3.5-turbo-customname"
+  # embeddings deployment is required when Zep is configured to use OpenAI embeddings
+  #   embedding_deployment: "text-embedding-ada-002-customname"
   # Use only with an alternate OpenAI-compatible API endpoint
   openai_endpoint:
   openai_org_id:
@@ -14,6 +26,9 @@ extractors:
   documents:
     embeddings:
       enabled: true
+      max_procs: 2
+      chunk_size: 1000
+      buffer_size: 1000
       dimensions: 384
       service: "local"
 #      dimensions: 1536
@@ -36,7 +51,13 @@ store:
   postgres:
     dsn: "postgres://postgres:postgres@localhost:5432/?sslmode=disable"
 server:
+  # Specify the host to listen on. Defaults to 0.0.0.0
+  host: 0.0.0.0
   port: 8000
+  # Is the Web UI enabled?
+  # Warning: The Web UI is not secured by authentication and should not be enabled if
+  # Zep is exposed to the public internet.
+  web_enabled: true
 auth:
   # Set to true to enable authentication
   required: false
@@ -49,3 +70,42 @@ data:
   purge_every: 60
 log:
   level: "info"
+# Custom Prompts Configuration
+# Allows customization of extractor prompts.
+custom_prompts:
+  summarizer_prompts:
+    # Anthropic Guidelines:
+    # - Use XML-style tags like <current_summary> as element identifiers.
+    # - Include {{.PrevSummary}} and {{.MessagesJoined}} as template variables.
+    # - Clearly explain model instructions, e.g., "Review content inside <current_summary></current_summary> tags".
+    # - Provide a clear example within the prompt.
+    #
+    # Example format:
+    # anthropic: |
+    #   <YOUR INSTRUCTIONS HERE>
+    #   <example>
+    #     <PROVIDE AN EXAMPLE>
+    #   </example>
+    #   <current_summary>{{.PrevSummary}}</current_summary>
+    #   <new_lines>{{.MessagesJoined}}</new_lines>
+    #   Response without preamble.
+    #
+    # If left empty, the default Anthropic summary prompt from zep/pkg/extractors/prompts.go will be used.
+    anthropic: |
+
+    # OpenAI summarizer prompt configuration.
+    # Guidelines:
+    # - Include {{.PrevSummary}} and {{.MessagesJoined}} as template variables.
+    # - Provide a clear example within the prompt.
+    #
+    # Example format:
+    # openai: |
+    #   <YOUR INSTRUCTIONS HERE>
+    #   Example:
+    #     <PROVIDE AN EXAMPLE>
+    #   Current summary: {{.PrevSummary}}
+    #   New lines of conversation: {{.MessagesJoined}}
+    #   New summary:`
+    #
+    # If left empty, the default OpenAI summary prompt from zep/pkg/extractors/prompts.go will be used.
+    openai: |

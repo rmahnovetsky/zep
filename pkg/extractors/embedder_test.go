@@ -4,13 +4,22 @@ import (
 	"math"
 	"testing"
 
+	"github.com/getzep/zep/pkg/store/postgres"
+
 	"github.com/getzep/zep/pkg/llms"
 	"github.com/getzep/zep/pkg/models"
 	"github.com/getzep/zep/pkg/testutils"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestEmbeddingExtractor_Extract(t *testing.T) {
+func TestEmbeddingExtractor_Extract_OpenAI(t *testing.T) {
+	llmClient, err := llms.NewOpenAILLM(testCtx, appState.Config)
+	assert.NoError(t, err)
+	appState.LLMClient = llmClient
+
+	err = postgres.MigrateMessageEmbeddingDims(testCtx, testDB, 1536)
+	assert.NoError(t, err)
+
 	store := appState.MemoryStore
 
 	documentType := "message"
@@ -48,8 +57,8 @@ func TestEmbeddingExtractor_Extract(t *testing.T) {
 	}
 
 	model := &models.EmbeddingModel{
-		Service:    "local",
-		Dimensions: 384,
+		Service:    "openai",
+		Dimensions: 1536,
 	}
 	embeddings, err := llms.EmbedTexts(testCtx, appState, model, documentType, texts)
 	assert.NoError(t, err)
@@ -76,11 +85,25 @@ func TestEmbeddingExtractor_Extract(t *testing.T) {
 
 	assert.Equal(t, len(expectedEmbeddingRecords), len(embeddedMessages))
 
-	// Test if the length of embeddedMessages is equal to the length of messageEvent.Messages
-	for i, r := range embeddedMessages {
-		assert.Equal(t, expectedEmbeddingRecords[i].TextUUID, r.TextUUID)
-		assert.Equal(t, expectedEmbeddingRecords[i].Text, r.Text)
-		compareFloat32Vectors(t, expectedEmbeddingRecords[i].Embedding, r.Embedding, 0.001)
+	expectedEmbeddingRecordsMap := make(map[string]models.MessageEmbedding)
+	for _, r := range expectedEmbeddingRecords {
+		expectedEmbeddingRecordsMap[r.TextUUID.String()] = r
+	}
+
+	embeddedMessagesMap := make(map[string]models.MessageEmbedding)
+	for _, r := range embeddedMessages {
+		embeddedMessagesMap[r.TextUUID.String()] = r
+	}
+
+	assert.Equal(t, len(expectedEmbeddingRecordsMap), len(embeddedMessagesMap))
+
+	for uuid, expectedRecord := range expectedEmbeddingRecordsMap {
+		actualRecord, ok := embeddedMessagesMap[uuid]
+		assert.True(t, ok)
+
+		assert.Equal(t, expectedRecord.TextUUID, actualRecord.TextUUID)
+		assert.Equal(t, expectedRecord.Text, actualRecord.Text)
+		compareFloat32Vectors(t, expectedRecord.Embedding, actualRecord.Embedding, 0.001)
 	}
 }
 

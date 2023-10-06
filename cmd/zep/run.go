@@ -39,7 +39,7 @@ func run() {
 
 	handleCLIOptions(cfg)
 
-	log.Infof("Starting zep server version %s", config.VersionString)
+	log.Infof("Starting Zep server version %s", config.VersionString)
 
 	config.SetLogLevel(cfg)
 	appState := NewAppState(cfg)
@@ -47,6 +47,9 @@ func run() {
 	srv := server.Create(appState)
 
 	log.Infof("Listening on: %s", srv.Addr)
+	if cfg.Server.WebEnabled {
+		log.Infof("Web UI available at: %s", srv.Addr+"/admin")
+	}
 	err = srv.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
@@ -58,9 +61,15 @@ func run() {
 func NewAppState(cfg *config.Config) *models.AppState {
 	ctx := context.Background()
 
+	// Create a new LLM client
+	llmClient, err := llms.NewLLMClient(ctx, cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	appState := &models.AppState{
-		OpenAIClient: llms.NewOpenAIRetryClient(cfg),
-		Config:       cfg,
+		LLMClient: llmClient,
+		Config:    cfg,
 	}
 
 	initializeStores(appState)
@@ -77,20 +86,20 @@ func NewAppState(cfg *config.Config) *models.AppState {
 
 // handleCLIOptions handles CLI options that don't require the server to run
 func handleCLIOptions(cfg *config.Config) {
-	if showVersion {
+	switch {
+	case showVersion:
 		fmt.Println(config.VersionString)
 		os.Exit(0)
-	} else if dumpConfig {
+	case dumpConfig:
 		fmt.Println(dumpConfigToJSON(cfg))
 		os.Exit(0)
-	} else if generateKey {
+	case generateKey:
 		fmt.Println(auth.GenerateJWT(cfg))
 		os.Exit(0)
 	}
 }
 
 // initializeStores initializes the memory and document stores based on the config file / ENV
-// TODO: refactor to include document store switch
 func initializeStores(appState *models.AppState) {
 	if appState.Config.Store.Type == "" {
 		log.Fatal(ErrStoreTypeNotSet)
@@ -101,7 +110,10 @@ func initializeStores(appState *models.AppState) {
 		if appState.Config.Store.Postgres.DSN == "" {
 			log.Fatal(ErrPostgresDSNNotSet)
 		}
-		db := postgres.NewPostgresConn(appState)
+		db, err := postgres.NewPostgresConn(appState)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v\n", err)
+		}
 		if appState.Config.Log.Level == "debug" {
 			pgDebugLogging(db)
 		}
@@ -112,13 +124,13 @@ func initializeStores(appState *models.AppState) {
 		log.Debug("memoryStore created")
 
 		// create channels for the document embedding processor
-		// TODO: make this a configurable buffer size
 		embeddingTaskChannel := make(
 			chan []models.DocEmbeddingTask,
-			100,
+			// We use the Pool's buffer, so this doesn't need to be large
+			10,
 		)
-		// TODO: make this a configurable buffer size
-		embeddingUpdateChannel := make(chan []models.DocEmbeddingUpdate, 100)
+		// TODO: Make channel size configurable
+		embeddingUpdateChannel := make(chan []models.DocEmbeddingUpdate, 500)
 		documentStore, err := postgres.NewDocumentStore(
 			appState,
 			db,
@@ -142,8 +154,12 @@ func initializeStores(appState *models.AppState) {
 		}
 		log.Debug("embeddingProcessor started")
 
+		userStore := postgres.NewUserStoreDAO(db)
+		log.Debug("userStore created")
+
 		appState.MemoryStore = memoryStore
 		appState.DocumentStore = documentStore
+		appState.UserStore = userStore
 	default:
 		log.Fatal(
 			fmt.Sprintf(

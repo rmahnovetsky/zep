@@ -32,7 +32,7 @@ func TestCollectionCreate(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(10)
@@ -70,7 +70,7 @@ func TestCollectionUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(10)
@@ -87,13 +87,14 @@ func TestCollectionUpdate(t *testing.T) {
 	err = collection.GetByName(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedDimensions, collection.EmbeddingDimensions)
+	assert.Less(t, collection.CreatedAt, collection.UpdatedAt)
 }
 
 func TestCollectionGetByName(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(10)
@@ -143,7 +144,7 @@ func TestCollectionGetAll(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	var collectionsToCreate []DocumentCollectionDAO
@@ -179,7 +180,7 @@ func TestDeleteCollection(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(10)
@@ -248,7 +249,7 @@ func TestDocumentCollectionCreateDocuments(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(3)
@@ -319,7 +320,7 @@ func TestDocumentCollectionCreateDocuments(t *testing.T) {
 func TestDocumentCollectionUpdateDocuments(t *testing.T) {
 	ctx := context.Background()
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(5)
@@ -404,7 +405,7 @@ func TestDocumentCollectionGetDocuments(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(10)
@@ -511,7 +512,7 @@ func TestDocumentCollectionDeleteDocumentByUUID(t *testing.T) {
 	ctx := context.Background()
 
 	CleanDB(t, testDB)
-	err := ensurePostgresSetup(ctx, appState, testDB)
+	err := CreateSchema(ctx, appState, testDB)
 	assert.NoError(t, err)
 
 	collection := NewTestCollectionDAO(10)
@@ -633,7 +634,7 @@ func TestDocumentEmbeddingTasker(t *testing.T) {
 func TestDocumentEmbeddingUpdater(t *testing.T) {
 	ctx, done := context.WithCancel(testCtx)
 	// create document collection
-	collection := NewTestCollectionDAO(384)
+	collection := NewTestCollectionDAO(1536)
 	collection.Name = testutils.GenerateRandomString(10)
 	collection.IsAutoEmbedded = true
 	err := collection.Create(ctx)
@@ -642,7 +643,7 @@ func TestDocumentEmbeddingUpdater(t *testing.T) {
 	// create document
 	document := models.Document{
 		DocumentBase: models.DocumentBase{
-			Content: testutils.GenerateRandomString(384),
+			Content: testutils.GenerateRandomString(1536),
 		},
 	}
 	uuids, err := collection.CreateDocuments(ctx, []models.Document{document})
@@ -690,7 +691,7 @@ func TestDocumentEmbeddingUpdater(t *testing.T) {
 	documents, err := collection.GetDocuments(ctx, 0, uuids, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(documents))
-	assert.Equal(t, 384, len(documents[0].Embedding))
+	assert.Equal(t, 1536, len(documents[0].Embedding))
 	assert.Equal(t, true, documents[0].IsEmbedded)
 
 	err = documentStore.Shutdown(ctx)

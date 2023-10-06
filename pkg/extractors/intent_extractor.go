@@ -3,17 +3,21 @@ package extractors
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/tmc/langchaingo/llms"
+
 	"github.com/getzep/zep/internal"
-	"github.com/getzep/zep/pkg/llms"
 	"github.com/getzep/zep/pkg/models"
 )
 
 var _ models.Extractor = &IntentExtractor{}
 
 const intentMaxTokens = 512
+
+var IntentStringRegex = regexp.MustCompile(`(?i)^\s*intent\W+\s+`)
 
 type IntentExtractor struct {
 	BaseExtractor
@@ -90,15 +94,20 @@ func (ee *IntentExtractor) processMessage(
 	}
 
 	// Send the populated prompt to the language model
-	resp, err := llms.RunChatCompletion(ctx, appState, intentMaxTokens, prompt)
+	intentContent, err := appState.LLMClient.Call(
+		ctx,
+		prompt,
+		llms.WithMaxTokens(intentMaxTokens),
+	)
 	if err != nil {
 		errs <- NewExtractorError("IntentExtractor: "+err.Error(), err)
 		return
 	}
 
 	// Get the intent from the response
-	intentContent := resp.Choices[0].Message.Content
-	intentContent = strings.TrimPrefix(intentContent, "Intent: ")
+	intentContent = IntentStringRegex.ReplaceAllStringFunc(intentContent, func(s string) string {
+		return ""
+	})
 
 	// if we don't have an intent, just return
 	if intentContent == "" {
@@ -116,7 +125,6 @@ func (ee *IntentExtractor) processMessage(
 	}
 
 	// Put the intent into the message metadata
-	log.Debugf("IntentExtractor: intentResponse: %+v", intentResponse)
 	err = appState.MemoryStore.PutMessageMetadata(
 		ctx,
 		appState,
